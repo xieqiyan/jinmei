@@ -1,0 +1,11 @@
+tmp/
+ziwang/
+jm-ckl:v1
+jm-xtl:v1
+jm-zzw:v1
+__pycache__/
+*.log
+*.zip
+*.tar.gz
+node_modules/
+.env
