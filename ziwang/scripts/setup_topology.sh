@@ -113,9 +113,14 @@ verify_topology() {
                    docker exec "$name" test -s "/tmp/radio_test/${type}_config.cfg"; then
                     up_ofport="$(docker exec "$name" ovs-vsctl get Interface eth-up ofport 2>/dev/null | tr -d '\r\"')"
                     flows="$(docker exec "$name" ovs-ofctl dump-flows br0 2>/dev/null || true)"
+                    # ovs-ofctl does not guarantee a stable field order.  Match
+                    # the semantic fields instead of assuming in_port precedes
+                    # dl_type (the dump commonly prints ip/arp first).
                     if [[ "$up_ofport" =~ ^[0-9]+$ && "$up_ofport" -gt 0 ]] && \
-                       grep -Eq "priority=270,in_port=LOCAL,ip,nw_src=[^ ]+ actions=output:${up_ofport}([, ]|$)" <<<"$flows" && \
-                       grep -Eq "priority=270,in_port=LOCAL,arp,arp_spa=[^ ]+ actions=output:${up_ofport}([, ]|$)" <<<"$flows"; then
+                       grep -Eq "priority=270,.*nw_src=[^ ]+.*actions=output:${up_ofport}([, ]|$)" <<<"$flows" && \
+                       grep -Eq "priority=270,.*arp_spa=[^ ]+.*actions=output:${up_ofport}([, ]|$)" <<<"$flows" && \
+                       grep -Eq "priority=270,.*in_port=LOCAL.*nw_src=" <<<"$flows" && \
+                       grep -Eq "priority=270,.*in_port=LOCAL.*arp_spa=" <<<"$flows"; then
                         ready=1
                         break
                     fi
@@ -158,6 +163,11 @@ create_type_networks() {
         type="${TYPES[$type_index]}"
         bridge="br-${type}"
         ip link add "$bridge" type bridge
+        # Keep the Relay's L2 address stable. Linux may otherwise change a
+        # bridge MAC when veth ports are enslaved, invalidating device ARP
+        # entries that were installed earlier in make_group().
+        bridge_mac="02:89:$(printf '%02x' "$((type_index + 1))"):00:00:01"
+        ip link set dev "$bridge" address "$bridge_mac"
         ip link set "$bridge" up
         for index in "${!TOPOLOGY_GROUPS[@]}"; do
             ip addr add "10.89.$((type_index + 1)).$((index + 101))/24" dev "$bridge"
@@ -219,15 +229,18 @@ else
   printf 'nodeNum=%s\nbusinessIp=%s\nradioPower=1\nfreqType=1\nfreq=300.0\nuserRate=1\nsuperiorNetNo=0\nhostPrime=1\n' "$NODE_NO" "$NS_IP" >/tmp/radio_test/zzw_config.cfg
   config=/tmp/radio_test/zzw_config.cfg; daemon=zzw_daemon
 fi
-nohup python3 /usr/local/bin/radio_param_service.py --device "$DEVICE" --config-file "$config" >/tmp/radio_test/radio_param_service.log 2>&1 &
+nohup python3 /usr/local/bin/radio_param_service.py --device "$DEVICE" --config-file "$config" --response-ip "$RELAY_IP" >/tmp/radio_test/radio_param_service.log 2>&1 &
 nohup "$daemon" -i br0 -b br0 -n eth-ns -u eth-up >/tmp/radio_test/${DEVICE}_daemon.log 2>&1 &
-nohup python3 /usr/local/lib/radio_protocol/topology_reporter.py --config-file "$config" --dest-ip "$RELAY_IP" >/tmp/radio_test/topology_reporter.log 2>&1 &
+nohup python3 /usr/local/lib/radio_protocol/topology_reporter.py \
+  --config-file "$config" --dest-ip "$RELAY_IP" \
+  --relay-ns-ip "$NS_IP" --device "$DEVICE" \
+  >/tmp/radio_test/topology_reporter.log 2>&1 &
 CONTAINER
     done
     # Relay is one process per NS group, with three independent device links.
     config="/tmp/radio-relay-${group}.json"
     cat >"$config" <<EOF
-{"relay":{"listenIp":"$gateway","nsCidr":"${NS_NET}","nsIp":"$ns_ip","requestPort":10001,"responsePort":10009,"eventPort":8882,"nsInterface":"$ns_bridge","logFile":"/tmp/radio-relay-${group}.log","devices":{"ckl":"10.89.1.$((index + 11))","xtl":"10.89.2.$((index + 11))","zzw":"10.89.3.$((index + 11))"},"deviceInterfaces":{"ckl":"br-ckl","xtl":"br-xtl","zzw":"br-zzw"},"deviceListenIps":{"ckl":"10.89.1.$((index + 101))","xtl":"10.89.2.$((index + 101))","zzw":"10.89.3.$((index + 101))"}}}
+{"relay":{"listenIp":"$gateway","nsCidr":"${NS_NET}","nsIp":"$ns_ip","allowedNsIps":["$ns_ip"],"requestPort":10001,"responsePort":10009,"eventPort":8882,"nsInterface":"$ns_bridge","logFile":"/tmp/radio-relay-${group}.log","devices":{"ckl":"10.89.1.$((index + 11))","xtl":"10.89.2.$((index + 11))","zzw":"10.89.3.$((index + 11))"},"deviceInterfaces":{"ckl":"br-ckl","xtl":"br-xtl","zzw":"br-zzw"},"deviceListenIps":{"ckl":"10.89.1.$((index + 101))","xtl":"10.89.2.$((index + 101))","zzw":"10.89.3.$((index + 101))"}}}
 EOF
     RELAY_CONFIG="$config" nohup "$ROOT/relay/run_relay.sh" >/tmp/radio-relay-${group}.stdout.log 2>&1 &
     echo $! >"$(relay_pid_file "$group")"

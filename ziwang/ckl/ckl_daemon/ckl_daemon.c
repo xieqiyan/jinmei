@@ -261,6 +261,9 @@ static int ovs_reset_base_flows(const char *bridge, const char *ns_port, const c
     if (ovs_add_flowf(bridge, "priority=260,udp,tp_dst=10001,actions=NORMAL") != 0) {
         return -1;
     }
+    if (ovs_add_flowf(bridge, "priority=260,in_port=%s,udp,tp_src=10009,actions=LOCAL", up_port) != 0) {
+        return -1;
+    }
     if (ovs_add_flowf(bridge, "priority=260,udp,tp_src=10001,actions=NORMAL") != 0) {
         return -1;
     }

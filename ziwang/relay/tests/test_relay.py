@@ -9,6 +9,7 @@ sys.path.insert(0, str(ROOT))
 
 from relay.relay import (RelayConfig, build_udp_ipv4_packet, classify_payload,
                          rewrite_ipv4_packet, validate_payload)
+from relay.relay_envelope import decode as decode_envelope, encode as encode_envelope
 
 
 def test_classify_queries_and_injections():
@@ -78,3 +79,14 @@ def test_config_rejects_reused_addresses(tmp_path):
         assert "unique" in str(error)
     else:
         raise AssertionError("duplicate relay addresses were accepted")
+
+
+def test_relay_envelope_preserves_ns_identity_and_payload():
+    payload = bytes([0x0A, 0x01, 0x01]) + bytes(154)
+    wrapped = encode_envelope(payload, "10.88.0.7", "ckl", 10009)
+    envelope = decode_envelope(wrapped)
+    assert envelope is not None
+    assert envelope.ns_ip == "10.88.0.7"
+    assert envelope.device == "ckl"
+    assert envelope.reply_port == 10009
+    assert envelope.payload == payload

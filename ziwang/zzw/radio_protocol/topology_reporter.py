@@ -9,6 +9,8 @@ import struct
 import time
 from typing import Dict, List
 
+from relay_envelope import encode as encode_relay
+
 
 TOPOLOGY_REPORT_PORT = 8882
 INFO_TYPE_1 = 0x14
@@ -106,6 +108,9 @@ def serve(args: argparse.Namespace) -> None:
             status = read_status(args.peer_file, args.config_file)
             dest_ip = resolve_dest_ip(args, status)
             data = build_report(status)
+            if args.relay_ns_ip:
+                data = encode_relay(data, args.relay_ns_ip, args.device,
+                                    args.dest_port, 8882)
             sock.sendto(data, (dest_ip, args.dest_port))
             print(f"topology report sent len={len(data)} peers={data[11]} dest={dest_ip}", flush=True)
         except (OSError, ValueError, json.JSONDecodeError) as exc:
@@ -122,6 +127,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--config-file", default="/tmp/radio_test/zzw_config.cfg")
     parser.add_argument("--dest-ip")
     parser.add_argument("--dest-port", type=int, default=TOPOLOGY_REPORT_PORT)
+    parser.add_argument("--relay-ns-ip", help="NS identity carried in the Relay envelope")
+    parser.add_argument("--device", choices=("ckl", "xtl", "zzw"), default="zzw")
     parser.add_argument("--interval", type=float, default=2.0)
     return parser.parse_args()
 

@@ -9,7 +9,7 @@
 - `zzw/`：ZZW 镜像业务代码，可作为独立 Docker 构建上下文
 - `scripts/`：镜像构建和测试拓扑搭建脚本
 - `tools/`：参数客户端、拓扑接收器、监听器和流表查看工具
-- `relay/`：NS 到 CKL/XTL/ZZW 的透明协议中转程序，保持原业务报文格式
+- `relay/`：按 UDP 端点工作的 NS 到 CKL/XTL/ZZW 中转程序，通过封装头传递 NS 身份
 - `docs/`：业务说明、启动说明和接口协议文档
 
 透明中转设备说明见 [`relay/README.md`](relay/README.md)。

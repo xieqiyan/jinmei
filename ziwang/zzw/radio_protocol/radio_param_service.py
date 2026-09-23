@@ -30,6 +30,7 @@ from radio_protocol_common import (
     short_ack_count,
     split_short_injections,
 )
+from relay_envelope import decode as decode_relay, encode as encode_relay
 
 SERVICE_DEVICE = "zzw"
 
@@ -198,14 +199,17 @@ def query_matches_service(data: bytes, device: str) -> bool:
 
 
 def send_fragmented_response(sock: socket.socket, full_data: bytes, dest_ip: str,
-                             transaction_id: int, max_payload: int) -> int:
+                             transaction_id: int, max_payload: int,
+                             response_port: int = QUERY_RESPONSE_PORT,
+                             wrap=None) -> int:
     max_payload = max(256, min(max_payload, DEFAULT_MAX_FRAG_PAYLOAD))
     total = (len(full_data) + max_payload - 1) // max_payload
     for idx in range(total):
         start = idx * max_payload
         payload = full_data[start:start + max_payload]
         header = struct.pack("<4sHHH", FRAG_MAGIC, transaction_id & 0xFFFF, total, idx)
-        sock.sendto(header + payload, (dest_ip, QUERY_RESPONSE_PORT))
+        packet = header + payload
+        sock.sendto(wrap(packet) if wrap else packet, (dest_ip, response_port))
     return total
 
 
@@ -245,8 +249,24 @@ def serve(args: argparse.Namespace) -> None:
 
     while True:
         data, peer = sock.recvfrom(65535)
-        peer_ip = peer[0]
-        response_ip = args.response_ip or peer_ip
+        envelope = None
+        try:
+            envelope = decode_relay(data)
+        except ValueError as exc:
+            print(f"reject malformed relay envelope from {peer[0]}: {exc}", flush=True)
+            continue
+        if envelope is not None and envelope.device != args.device:
+            print(f"reject relay envelope for {envelope.device} on {args.device}", flush=True)
+            continue
+        if envelope is not None:
+            data = envelope.payload
+        peer_ip = envelope.ns_ip if envelope is not None else peer[0]
+        response_ip = args.response_ip or (peer[0] if envelope is not None else peer_ip)
+        response_port = envelope.reply_port if envelope is not None else QUERY_RESPONSE_PORT
+        wrap_response = (lambda payload: encode_relay(
+            payload, envelope.ns_ip, args.device, response_port,
+            envelope.request_port,
+        )) if envelope is not None else None
 
         if is_query_packet(data):
             if not query_matches_service(data, args.device):
@@ -256,7 +276,10 @@ def serve(args: argparse.Namespace) -> None:
             response = build_full_query_response(args.device, body)
             wants_frag, tid, max_payload = parse_query_fragment_ext(data)
             if wants_frag:
-                count = send_fragmented_response(sock, response, response_ip, tid, max_payload)
+                count = send_fragmented_response(
+                    sock, response, response_ip, tid, max_payload,
+                    response_port, wrap_response,
+                )
                 print(
                     f"query {args.device} fragmented response to {response_ip} "
                     f"(requester {peer_ip}), "
@@ -264,7 +287,8 @@ def serve(args: argparse.Namespace) -> None:
                     flush=True,
                 )
             else:
-                sock.sendto(response, (response_ip, QUERY_RESPONSE_PORT))
+                sock.sendto(wrap_response(response) if wrap_response else response,
+                             (response_ip, response_port))
                 print(f"query {args.device} response to {response_ip} (requester {peer_ip}), len={len(response)}", flush=True)
             continue
 
@@ -275,7 +299,9 @@ def serve(args: argparse.Namespace) -> None:
                 save_param(args.state, args.device, body, raw_record)
             result = 0 if ok else 1
             for ack_idx in range(ack_count):
-                sock.sendto(bytes([INJECT_ACK_CMD, result]), (response_ip, INJECT_ACK_PORT))
+                ack = bytes([INJECT_ACK_CMD, result])
+                sock.sendto(wrap_response(ack) if wrap_response else ack,
+                            (response_ip, response_port if envelope is not None else INJECT_ACK_PORT))
                 print(
                     f"inject {label} field_ack={ack_idx + 1}/{ack_count} "
                     f"from {peer_ip}, result={result}",

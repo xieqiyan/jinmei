@@ -53,25 +53,25 @@ NS 到协议设备的业务统一发往本组 Relay，不存在共享 NS 交换�
 ## 4. 请求和回包路径
 
 NS 查询/加注只发往自己的 Relay NS 侧 IP，例如 nsA 发往
-`10.88.0.101:10001`。Relay 要求 UDP 源地址必须等于配置中的 `nsIp`，
-因此 nsB 发往 Relay-A 会被丢弃。
+`10.88.0.101:10001`。Relay 从 UDP 对端提取 NS 源地址，要求它属于配置的
+`nsCidr`/`allowedNsIps`，并将这个地址写入 `RLY1` 封装头；因此协议设备看到的外层源地址
+可以是 Relay，而业务身份仍是原始 NS 地址。
 
 Relay 按 payload 选择设备：
 
 - 查询 `0A 01 01/02/04` 选择 CKL/XTL/ZZW；
 - 短加注 `01 01/02/03` 选择 CKL/XTL/ZZW。
 
-Relay 通过对应协议接口发送原始 IPv4/UDP 包，保留 NS 源 IP。设备收到
-请求后仍把请求源 IP作为 `businessIp` 语义；查询响应发往 NS IP，ACK 和
-拓扑上报发往设备所属 Relay 的协议子网 IP。Relay 只接受本组设备源地址，
-并且只接受目标为本组 NS IP 或本组 Relay 协议接口 IP 的响应，之后通过
-NS 侧接口转发给本组 NS。
+Relay 通过绑定自身协议侧 IP 的 UDP socket 发送封装报文，不修改原始协议
+payload，也不直接改 IPv4/MAC。设备服务解封装后使用头中的 NS IP 作为
+`businessIp`/requester；查询响应、ACK 和拓扑上报带相同封装头返回 Relay，
+Relay 解封装后通过 NS 侧 UDP socket 发给对应 NS。
 
 ## 5. 隔离规则
 
 1. 每个 NS 只接入自己的 `br-<组>-ns`，不存在共享 `br-ns`。
 2. NS namespace 不配置 CKL/XTL/ZZW 子网路由，不能直接访问协议设备。
-3. Relay 请求入口按精确 `nsIp` 和 `listenIp` 校验，其他 NS 不能借用该 Relay。
+3. Relay 请求入口按 `nsCidr` 校验 NS 源地址，设备回包中的 NS IP 也必须在该范围内。
 4. Relay 回包按本组设备地址校验，其他组设备的报文被丢弃。
 5. 协议 daemon 的 OVS 流表继续使用 `businessIp` 白名单，只放行已匹配的
    业务流；组网广播仍使用 `0x88B5` 管理流。
@@ -82,9 +82,11 @@ NS 侧接口转发给本组 NS。
   和 4 个 Relay 进程。
   脚本使用 `TOPOLOGY_GROUPS=(A B C D)`，避免与 Bash 内置只读数组
   `GROUPS` 冲突；启动结束会校验 12 个容器、4 个 namespace 和 4 个 Relay。
-- `relay/relay.py`：改为 NS/设备两侧 AF_PACKET 捕获，精确校验 NS 源/目的，
-  按 payload 选择三类协议设备，改写 IPv4 地址并重算 UDP/TCP 校验和；设备
-  侧通过二层广播发送，避免依赖未就绪的 ARP 邻居。
+- `relay/relay.py`：改为按 IP 绑定的 UDP 端点，不依赖任何固定网卡名称；按
+  payload 选择设备，并通过 `RLY1` 封装传递原始 NS IP。
+- `*/radio_protocol/relay_envelope.py`：定义 Relay 到协议设备的 NS 身份封装。
+- `*/radio_protocol/radio_param_service.py`、`topology_reporter.py`：支持
+  封装解包和带 NS 身份的响应/拓扑上报。
 - `scripts/setup_topology.sh`：通过 `docker exec -i` 执行容器初始化，并把协议
   桥 MAC 写入设备静态邻居表，保证设备回包能到达 Relay。
 - `relay/relay_config.json`：改为组 A 默认配置，字段与拓扑脚本生成的组配置
