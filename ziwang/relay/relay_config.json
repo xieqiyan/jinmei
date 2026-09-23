@@ -1,0 +1,28 @@
+{
+  "relay": {
+    "listenIp": "10.88.0.101",
+    "nsCidr": "10.88.0.0/24",
+    "nsIp": "10.88.0.1",
+    "requestPort": 10001,
+    "responsePort": 10009,
+    "eventPort": 8882,
+    "interface": "relay0",
+    "nsInterface": "br-A-ns",
+    "logFile": "/tmp/radio-relay.log",
+    "devices": {
+      "ckl": "10.89.1.11",
+      "xtl": "10.89.2.11",
+      "zzw": "10.89.3.11"
+    },
+    "deviceInterfaces": {
+      "ckl": "br-ckl",
+      "xtl": "br-xtl",
+      "zzw": "br-zzw"
+    },
+    "deviceListenIps": {
+      "ckl": "10.89.1.101",
+      "xtl": "10.89.2.101",
+      "zzw": "10.89.3.101"
+    }
+  }
+}

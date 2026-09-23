@@ -1,0 +1,3 @@
+__pycache__/
+*.pyc
+subnet_daemon/zzw_daemon

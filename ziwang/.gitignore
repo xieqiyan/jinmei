@@ -1,0 +1,6 @@
+test_logs/
+__pycache__/
+*.pyc
+ckl/ckl_daemon/ckl_daemon
+xtl/subnet_daemon/xtl_daemon
+zzw/subnet_daemon/zzw_daemon
